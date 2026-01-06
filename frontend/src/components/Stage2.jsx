@@ -14,7 +14,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
+export default function Stage2({ rankings, labelToModel, aggregateRankings, minorityOpinions }) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (!rankings || rankings.length === 0) {
@@ -89,6 +89,43 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
                 <span className="rank-count">
                   ({agg.rankings_count} votes)
                 </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {minorityOpinions && minorityOpinions.length > 0 && (
+        <div className="minority-opinions">
+          <h4>Minority Opinions</h4>
+          <p className="stage-description">
+            Significant disagreement detected (30% or more of rankers dissent):
+          </p>
+          <div className="minority-list">
+            {minorityOpinions.map((opinion, index) => (
+              <div key={index} className="minority-item">
+                <div className="minority-header">
+                  <span className="minority-model">
+                    {opinion.model.split('/')[1] || opinion.model}
+                  </span>
+                  <span className={`minority-direction ${opinion.direction}`}>
+                    {opinion.direction === 'overvalued' ? '↓ Overvalued' : '↑ Undervalued'}
+                  </span>
+                </div>
+                <div className="minority-details">
+                  <span className="minority-stat">
+                    Consensus: #{opinion.consensus_position}
+                  </span>
+                  <span className="minority-stat">
+                    Dissenters say: #{opinion.dissent_positions.join(', #')}
+                  </span>
+                  <span className="minority-stat">
+                    {Math.round(opinion.dissent_rate * 100)}% disagree
+                  </span>
+                </div>
+                <div className="minority-dissenters">
+                  Dissenters: {opinion.dissenters.map(d => d.split('/')[1] || d).join(', ')}
+                </div>
               </div>
             ))}
           </div>

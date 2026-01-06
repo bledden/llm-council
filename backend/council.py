@@ -393,6 +393,121 @@ def calculate_tournament_rankings(
     return results
 
 
+def detect_minority_opinions(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str],
+    tournament_rankings: List[Dict[str, Any]],
+    dissent_threshold: float = 0.3,
+    position_tolerance: int = 1
+) -> List[Dict[str, Any]]:
+    """
+    Detect minority opinions where a significant portion of rankers disagree
+    with the consensus ranking for a specific model.
+
+    A minority opinion is flagged when ≥dissent_threshold of rankers place a model
+    more than position_tolerance positions away from its consensus position.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+        tournament_rankings: Consensus ranking from tournament method
+        dissent_threshold: Minimum fraction of rankers that must disagree (default 0.3 = 30%)
+        position_tolerance: How many positions away counts as disagreement (default 1)
+
+    Returns:
+        List of minority opinion dicts:
+        [
+            {
+                "model": "openai/gpt-4o",
+                "consensus_position": 1,
+                "dissent_positions": [3, 4],  # where dissenters placed it
+                "dissent_rate": 0.4,
+                "dissenters": ["anthropic/claude-3.5-sonnet", "google/gemini-2.0-flash"],
+                "direction": "undervalued"  # or "overvalued" - dissenters think it's worse/better
+            },
+            ...
+        ]
+    """
+    from collections import defaultdict
+
+    if not stage2_results or not tournament_rankings:
+        return []
+
+    # Build consensus position lookup from tournament rankings
+    consensus_positions = {
+        entry["model"]: position + 1  # 1-indexed
+        for position, entry in enumerate(tournament_rankings)
+    }
+
+    # Track each ranker's position for each model
+    # Structure: {model_name: [(ranker_model, position), ...]}
+    model_rankings_by_ranker = defaultdict(list)
+
+    for ranking in stage2_results:
+        ranker_model = ranking.get('model')
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking:
+            continue
+
+        # Record where this ranker placed each model
+        for position, label in enumerate(parsed_ranking, start=1):
+            if label in label_to_model:
+                model_name = label_to_model[label]
+                model_rankings_by_ranker[model_name].append((ranker_model, position))
+
+    # Detect minority opinions for each model
+    minority_opinions = []
+
+    for model_name, rankings in model_rankings_by_ranker.items():
+        if model_name not in consensus_positions:
+            continue
+
+        consensus_pos = consensus_positions[model_name]
+        total_rankers = len(rankings)
+
+        if total_rankers == 0:
+            continue
+
+        # Find dissenters: rankers who placed this model far from consensus
+        dissenters = []
+        dissent_positions = []
+
+        for ranker_model, ranker_position in rankings:
+            position_diff = abs(ranker_position - consensus_pos)
+            if position_diff > position_tolerance:
+                dissenters.append(ranker_model)
+                dissent_positions.append(ranker_position)
+
+        dissent_rate = len(dissenters) / total_rankers
+
+        # Only report if dissent rate meets threshold
+        if dissent_rate >= dissent_threshold and dissenters:
+            # Determine direction: are dissenters ranking it higher or lower?
+            avg_dissent_pos = sum(dissent_positions) / len(dissent_positions)
+            if avg_dissent_pos > consensus_pos:
+                direction = "overvalued"  # consensus ranks it higher than dissenters think
+            else:
+                direction = "undervalued"  # consensus ranks it lower than dissenters think
+
+            minority_opinions.append({
+                "model": model_name,
+                "consensus_position": consensus_pos,
+                "dissent_positions": sorted(set(dissent_positions)),
+                "dissent_rate": round(dissent_rate, 2),
+                "dissenters": dissenters,
+                "direction": direction
+            })
+
+    # Sort by dissent rate (highest first)
+    minority_opinions.sort(key=lambda x: -x['dissent_rate'])
+
+    return minority_opinions
+
+
 async def generate_conversation_title(user_query: str) -> str:
     """
     Generate a short title for a conversation based on the first user message.
@@ -458,6 +573,11 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
     tournament_rankings = calculate_tournament_rankings(stage2_results, label_to_model)
 
+    # Detect minority opinions
+    minority_opinions = detect_minority_opinions(
+        stage2_results, label_to_model, tournament_rankings
+    )
+
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
         user_query,
@@ -469,7 +589,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     metadata = {
         "label_to_model": label_to_model,
         "aggregate_rankings": aggregate_rankings,
-        "tournament_rankings": tournament_rankings
+        "tournament_rankings": tournament_rankings,
+        "minority_opinions": minority_opinions
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

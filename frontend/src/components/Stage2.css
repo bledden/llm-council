@@ -151,3 +151,80 @@
   color: #999;
   font-size: 12px;
 }
+
+/* Minority Opinions */
+.minority-opinions {
+  background: #fff8e6;
+  padding: 16px;
+  border-radius: 8px;
+  margin-top: 20px;
+  border: 2px solid #ffd666;
+}
+
+.minority-opinions h4 {
+  margin: 0 0 12px 0;
+  color: #ad6800;
+  font-size: 15px;
+}
+
+.minority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.minority-item {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #ffd666;
+}
+
+.minority-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.minority-model {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.minority-direction {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.minority-direction.overvalued {
+  background: #fff1f0;
+  color: #cf1322;
+}
+
+.minority-direction.undervalued {
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.minority-details {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.minority-stat {
+  font-size: 13px;
+  color: #666;
+}
+
+.minority-dissenters {
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
+}
