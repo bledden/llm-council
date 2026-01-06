@@ -255,6 +255,144 @@ def calculate_aggregate_rankings(
     return aggregate
 
 
+def calculate_tournament_rankings(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Calculate rankings using tournament-style pairwise comparison.
+
+    For each pair of models, count how many rankers preferred one over the other.
+    The model with more pairwise wins ranks higher. This method is more robust
+    to outlier rankings than simple position averaging.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+
+    Returns:
+        List of dicts sorted by win_percentage (descending):
+        [
+            {
+                "model": "openai/gpt-4o",
+                "wins": 4.0,
+                "losses": 1.0,
+                "ties": 1.0,
+                "win_percentage": 0.75,
+                "total_matchups": 6
+            },
+            ...
+        ]
+    """
+    from collections import defaultdict
+
+    # Get all models from label_to_model
+    models = list(set(label_to_model.values()))
+
+    if len(models) < 2:
+        # Need at least 2 models for pairwise comparison
+        return [{"model": m, "wins": 0, "losses": 0, "ties": 0, "win_percentage": 0.0, "total_matchups": 0} for m in models]
+
+    # Track pairwise wins: pairwise_wins[(model_a, model_b)] = count of times a ranked above b
+    pairwise_wins = defaultdict(int)
+
+    # Process each ranker's parsed ranking
+    # Use pre-parsed ranking if available, otherwise parse from text
+    for ranking in stage2_results:
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            # Fallback: parse from raw ranking text (consistent with calculate_aggregate_rankings)
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking:
+            continue
+
+        # Convert labels to model names and get their positions
+        model_positions = {}
+        for position, label in enumerate(parsed_ranking):
+            if label in label_to_model:
+                model_name = label_to_model[label]
+                model_positions[model_name] = position
+
+        # For each pair of models, record who was ranked higher (lower position = better)
+        ranked_models = list(model_positions.keys())
+        for i in range(len(ranked_models)):
+            for j in range(i + 1, len(ranked_models)):
+                model_a = ranked_models[i]
+                model_b = ranked_models[j]
+                pos_a = model_positions[model_a]
+                pos_b = model_positions[model_b]
+
+                # Ensure consistent ordering for the key
+                if model_a > model_b:
+                    model_a, model_b = model_b, model_a
+                    pos_a, pos_b = pos_b, pos_a
+
+                if pos_a < pos_b:
+                    pairwise_wins[(model_a, model_b, 'a')] += 1
+                elif pos_b < pos_a:
+                    pairwise_wins[(model_a, model_b, 'b')] += 1
+                # Equal positions would be a tie (shouldn't happen with rankings)
+
+    # Calculate wins, losses, and ties for each model
+    model_stats = {model: {"wins": 0.0, "losses": 0.0, "ties": 0.0} for model in models}
+
+    # Process each unique pair of models
+    processed_pairs = set()
+    for i in range(len(models)):
+        for j in range(i + 1, len(models)):
+            model_a, model_b = models[i], models[j]
+            if model_a > model_b:
+                model_a, model_b = model_b, model_a
+
+            pair_key = (model_a, model_b)
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+
+            a_wins = pairwise_wins.get((model_a, model_b, 'a'), 0)
+            b_wins = pairwise_wins.get((model_a, model_b, 'b'), 0)
+
+            if a_wins > b_wins:
+                model_stats[model_a]["wins"] += 1
+                model_stats[model_b]["losses"] += 1
+            elif b_wins > a_wins:
+                model_stats[model_b]["wins"] += 1
+                model_stats[model_a]["losses"] += 1
+            elif a_wins == b_wins and (a_wins > 0 or b_wins > 0):
+                # Tie - both get 0.5
+                model_stats[model_a]["ties"] += 1
+                model_stats[model_b]["ties"] += 1
+
+    # Calculate win percentage and build results
+    total_possible_matchups = len(models) - 1 if len(models) > 1 else 1
+    results = []
+
+    for model in models:
+        stats = model_stats[model]
+        total_matchups = stats["wins"] + stats["losses"] + stats["ties"]
+        # Win percentage: wins + 0.5*ties / total matchups
+        if total_matchups > 0:
+            win_pct = (stats["wins"] + 0.5 * stats["ties"]) / total_possible_matchups
+        else:
+            win_pct = 0.0
+
+        results.append({
+            "model": model,
+            "wins": stats["wins"],
+            "losses": stats["losses"],
+            "ties": stats["ties"],
+            "win_percentage": round(win_pct, 3),
+            "total_matchups": int(total_matchups)
+        })
+
+    # Sort by win percentage (higher is better)
+    results.sort(key=lambda x: (-x['win_percentage'], x['losses']))
+
+    return results
+
+
 async def generate_conversation_title(user_query: str) -> str:
     """
     Generate a short title for a conversation based on the first user message.
@@ -316,8 +454,9 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Stage 2: Collect rankings
     stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
 
-    # Calculate aggregate rankings
+    # Calculate aggregate rankings (both methods)
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+    tournament_rankings = calculate_tournament_rankings(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
@@ -329,7 +468,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "tournament_rankings": tournament_rankings
     }
 
     return stage1_results, stage2_results, stage3_result, metadata
