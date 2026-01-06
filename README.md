@@ -85,3 +85,47 @@ Then open http://localhost:5173 in your browser.
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript
+
+## Ranking Algorithms
+
+The council uses two methods to aggregate peer rankings from Stage 2:
+
+### Mean Position Averaging
+The original method calculates each model's average position across all rankings. Simple but susceptible to outlier rankings.
+
+### Tournament-Style Pairwise Comparison
+A more robust method that counts head-to-head wins between each pair of models. For each pair (A, B), we count how many rankers preferred A over B. The model with more pairwise victories wins that matchup.
+
+**Why tournament ranking is more robust:**
+
+Consider a 3-model council where Models A, B, C all rank themselves first (self-promotion bias):
+- Model A ranks: A=1, B=2, C=3
+- Model B ranks: B=1, A=2, C=3
+- Model C ranks: C=1, A=2, B=3
+
+Mean ranking results:
+| Model | Positions | Average |
+|-------|-----------|---------|
+| A | 1, 2, 2 | 1.67 |
+| B | 2, 1, 3 | 2.00 |
+| C | 3, 3, 1 | 2.33 |
+
+Tournament results:
+| Model | vs A | vs B | vs C | Win% |
+|-------|------|------|------|------|
+| A | - | 2-1 | 2-1 | 100% |
+| B | 1-2 | - | 2-1 | 50% |
+| C | 1-2 | 1-2 | - | 0% |
+
+Model A wins both pairwise matchups (2-1 against B, 2-1 against C) and deserves first place. The tournament method correctly identifies this.
+
+**Outlier robustness validation:**
+
+When one ranker places Model A last (outlier vote), mean ranking degrades A from 1.0 to 1.5 average. Tournament ranking keeps A at 100% win rate because A still wins the majority of head-to-head comparisons. This demonstrates tournament ranking's robustness to strategic voting and outliers.
+
+**Validation tests verify:**
+- Pairwise comparison math correctness
+- Tie handling (0.5 points awarded to each model)
+- Edge cases (single model, empty rankings)
+- Fallback parsing from raw ranking text
+- Realistic 5-model council scenarios
