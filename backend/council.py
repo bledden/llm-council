@@ -508,6 +508,148 @@ def detect_minority_opinions(
     return minority_opinions
 
 
+def detect_ranking_conflicts(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Detect fundamental conflicts in rankings - cases where rankers strongly
+    disagree about which response is better.
+
+    A conflict is detected when two models rank each other in opposite directions
+    (A ranks B high while B ranks A low, or vice versa). This indicates a
+    fundamental disagreement rather than just different wording preferences.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+
+    Returns:
+        List of conflict dicts:
+        [
+            {
+                "model_a": "openai/gpt-4o",
+                "model_b": "anthropic/claude-3.5-sonnet",
+                "conflict_type": "mutual_opposition",  # or "ranking_swap"
+                "details": {
+                    "a_ranks_b": 4,  # where model_a placed model_b
+                    "b_ranks_a": 5,  # where model_b placed model_a
+                    "a_self_rank": 1,  # where model_a placed itself
+                    "b_self_rank": 1   # where model_b placed itself
+                },
+                "severity": "high"  # high, medium, low
+            },
+            ...
+        ]
+    """
+    if not stage2_results or not label_to_model:
+        return []
+
+    # Reverse mapping: model name -> label
+    model_to_label = {model: label for label, model in label_to_model.items()}
+
+    # Build a matrix of how each ranker ranked each model
+    # ranker_rankings[ranker_model][ranked_model] = position
+    ranker_rankings = {}
+
+    for ranking in stage2_results:
+        ranker_model = ranking.get('model')
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking or not ranker_model:
+            continue
+
+        ranker_rankings[ranker_model] = {}
+        for position, label in enumerate(parsed_ranking, start=1):
+            if label in label_to_model:
+                ranked_model = label_to_model[label]
+                ranker_rankings[ranker_model][ranked_model] = position
+
+    conflicts = []
+    models = list(set(label_to_model.values()))
+    processed_pairs = set()
+
+    # Check each pair of models for conflicts
+    for i in range(len(models)):
+        for j in range(i + 1, len(models)):
+            model_a, model_b = models[i], models[j]
+
+            # Ensure consistent pair ordering
+            pair_key = tuple(sorted([model_a, model_b]))
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+
+            # Get how each model ranked the other
+            a_ranks_b = ranker_rankings.get(model_a, {}).get(model_b)
+            b_ranks_a = ranker_rankings.get(model_b, {}).get(model_a)
+            a_self_rank = ranker_rankings.get(model_a, {}).get(model_a)
+            b_self_rank = ranker_rankings.get(model_b, {}).get(model_b)
+
+            if a_ranks_b is None or b_ranks_a is None:
+                continue
+
+            total_models = len(models)
+
+            # Detect mutual opposition: both rank the other poorly while ranking themselves high
+            a_ranks_b_poorly = a_ranks_b > total_models / 2
+            b_ranks_a_poorly = b_ranks_a > total_models / 2
+            a_ranks_self_high = a_self_rank is not None and a_self_rank <= 2
+            b_ranks_self_high = b_self_rank is not None and b_self_rank <= 2
+
+            # Calculate position swap severity
+            # If A puts B at position X and B puts A at position Y, larger |X-Y| = more conflict
+            position_difference = abs(a_ranks_b - b_ranks_a)
+
+            conflict_detected = False
+            conflict_type = None
+            severity = "low"
+
+            # High severity: Mutual opposition with self-promotion
+            if a_ranks_b_poorly and b_ranks_a_poorly and a_ranks_self_high and b_ranks_self_high:
+                conflict_detected = True
+                conflict_type = "mutual_opposition"
+                severity = "high"
+
+            # Medium severity: Large position disagreement
+            elif position_difference >= total_models - 1:
+                conflict_detected = True
+                conflict_type = "ranking_swap"
+                severity = "medium"
+
+            # Lower threshold for smaller councils
+            elif total_models <= 4 and position_difference >= 2:
+                # One ranks the other top 2, other ranks them bottom 2
+                if (a_ranks_b <= 2 and b_ranks_a >= total_models - 1) or \
+                   (b_ranks_a <= 2 and a_ranks_b >= total_models - 1):
+                    conflict_detected = True
+                    conflict_type = "ranking_swap"
+                    severity = "medium"
+
+            if conflict_detected:
+                conflicts.append({
+                    "model_a": model_a,
+                    "model_b": model_b,
+                    "conflict_type": conflict_type,
+                    "details": {
+                        "a_ranks_b": a_ranks_b,
+                        "b_ranks_a": b_ranks_a,
+                        "a_self_rank": a_self_rank,
+                        "b_self_rank": b_self_rank
+                    },
+                    "severity": severity
+                })
+
+    # Sort by severity (high first)
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    conflicts.sort(key=lambda x: severity_order.get(x['severity'], 3))
+
+    return conflicts
+
+
 async def generate_conversation_title(user_query: str) -> str:
     """
     Generate a short title for a conversation based on the first user message.
@@ -578,6 +720,9 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         stage2_results, label_to_model, tournament_rankings
     )
 
+    # Detect ranking conflicts
+    ranking_conflicts = detect_ranking_conflicts(stage2_results, label_to_model)
+
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
         user_query,
@@ -590,7 +735,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         "label_to_model": label_to_model,
         "aggregate_rankings": aggregate_rankings,
         "tournament_rankings": tournament_rankings,
-        "minority_opinions": minority_opinions
+        "minority_opinions": minority_opinions,
+        "ranking_conflicts": ranking_conflicts
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

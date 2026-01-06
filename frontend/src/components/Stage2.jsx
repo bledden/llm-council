@@ -14,7 +14,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage2({ rankings, labelToModel, aggregateRankings, minorityOpinions }) {
+export default function Stage2({ rankings, labelToModel, aggregateRankings, minorityOpinions, rankingConflicts }) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (!rankings || rankings.length === 0) {
@@ -125,6 +125,44 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, mino
                 </div>
                 <div className="minority-dissenters">
                   Dissenters: {opinion.dissenters.map(d => d.split('/')[1] || d).join(', ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rankingConflicts && rankingConflicts.length > 0 && (
+        <div className="ranking-conflicts">
+          <h4>Ranking Conflicts</h4>
+          <p className="stage-description">
+            Fundamental disagreements detected between models:
+          </p>
+          <div className="conflict-list">
+            {rankingConflicts.map((conflict, index) => (
+              <div key={index} className={`conflict-item severity-${conflict.severity}`}>
+                <div className="conflict-header">
+                  <span className="conflict-models">
+                    {conflict.model_a.split('/')[1] || conflict.model_a}
+                    {' vs '}
+                    {conflict.model_b.split('/')[1] || conflict.model_b}
+                  </span>
+                  <span className={`conflict-severity ${conflict.severity}`}>
+                    {conflict.severity}
+                  </span>
+                </div>
+                <div className="conflict-type">
+                  {conflict.conflict_type === 'mutual_opposition'
+                    ? 'Mutual Opposition: Both rank the other poorly'
+                    : 'Ranking Swap: Large disagreement on relative quality'}
+                </div>
+                <div className="conflict-details">
+                  <span className="conflict-stat">
+                    {(conflict.model_a.split('/')[1] || conflict.model_a)} ranks other: #{conflict.details.a_ranks_b}
+                  </span>
+                  <span className="conflict-stat">
+                    {(conflict.model_b.split('/')[1] || conflict.model_b)} ranks other: #{conflict.details.b_ranks_a}
+                  </span>
                 </div>
               </div>
             ))}

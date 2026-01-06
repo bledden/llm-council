@@ -228,3 +228,99 @@
   color: #888;
   font-style: italic;
 }
+
+/* Ranking Conflicts */
+.ranking-conflicts {
+  background: #fff1f0;
+  padding: 16px;
+  border-radius: 8px;
+  margin-top: 20px;
+  border: 2px solid #ffa39e;
+}
+
+.ranking-conflicts h4 {
+  margin: 0 0 12px 0;
+  color: #a8071a;
+  font-size: 15px;
+}
+
+.conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conflict-item {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #ffa39e;
+}
+
+.conflict-item.severity-high {
+  border-left: 4px solid #cf1322;
+}
+
+.conflict-item.severity-medium {
+  border-left: 4px solid #fa8c16;
+}
+
+.conflict-item.severity-low {
+  border-left: 4px solid #fadb14;
+}
+
+.conflict-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.conflict-models {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.conflict-severity {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.conflict-severity.high {
+  background: #fff1f0;
+  color: #cf1322;
+}
+
+.conflict-severity.medium {
+  background: #fff7e6;
+  color: #d46b08;
+}
+
+.conflict-severity.low {
+  background: #fffbe6;
+  color: #d4b106;
+}
+
+.conflict-type {
+  font-size: 13px;
+  color: #595959;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.conflict-details {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.conflict-stat {
+  font-size: 12px;
+  color: #666;
+  font-family: monospace;
+}
